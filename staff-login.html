@@ -1,0 +1,2759 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  MapPin, Camera, AlertTriangle, CheckCircle2, Clock, Shield, Users,
+  BarChart3, Terminal, Plus, Filter, ArrowRight, Sparkles, RefreshCw,
+  Layers, Star, Search, Check, X, FileCode, Database, Cpu, Navigation,
+  Wrench, Trash2, Droplets, Lightbulb, Construction, Eye, Copy, CheckCheck,
+  SlidersHorizontal, GitMerge, ChevronDown, ChevronUp, Info, Compass, Globe,
+  LocateFixed, Phone, Award, Trophy, Lock, Unlock, Edit3, Video, Aperture,
+  LogOut, UserCheck, ThumbsUp, Route, ShieldAlert, BadgeCheck
+} from 'lucide-react';
+
+// ============================================================================
+// 1. CONSTANTS, SEED DATA & GIS CONFIGURATION (BHOPAL, MP DEFAULT)
+// ============================================================================
+
+const CATEGORIES = [
+  {
+    id: 'pothole',
+    name: 'Pothole',
+    baseRisk: 32,
+    deptId: 'dept-roads',
+    icon: Construction,
+    color: '#ef4444',
+    bg: 'bg-red-500/10 text-red-700 border-red-200',
+    autoTitle: 'Deep Asphalt Pothole & Road Surface Crater',
+    autoDesc: 'AI Vision detected a structural road depression (~15cm depth) posing high skidding risk to two-wheelers and commuters. Immediate cold-mix patching required.',
+  },
+  {
+    id: 'garbage',
+    name: 'Garbage Dump',
+    baseRisk: 18,
+    deptId: 'dept-sanitation',
+    icon: Trash2,
+    color: '#f59e0b',
+    bg: 'bg-amber-500/10 text-amber-700 border-amber-200',
+    autoTitle: 'Overflowing Municipal Solid Waste & Litter Pile',
+    autoDesc: 'AI Vision identified uncollected garbage accumulation spilling onto the pedestrian carriageway, creating hygiene hazards and stray animal attraction.',
+  },
+  {
+    id: 'water_leakage',
+    name: 'Water Leakage',
+    baseRisk: 28,
+    deptId: 'dept-water',
+    icon: Droplets,
+    color: '#3b82f6',
+    bg: 'bg-blue-500/10 text-blue-700 border-blue-200',
+    autoTitle: 'Pressurized Supply Pipeline Burst / Joint Leakage',
+    autoDesc: 'AI Vision detected active clean water discharge pooling along the roadside kerb, indicating a ruptured distribution joint or valve seal failure.',
+  },
+  {
+    id: 'streetlight',
+    name: 'Streetlight Outage',
+    baseRisk: 22,
+    deptId: 'dept-electrical',
+    icon: Lightbulb,
+    color: '#eab308',
+    bg: 'bg-yellow-500/10 text-yellow-800 border-yellow-200',
+    autoTitle: 'Non-Functional Streetlight Luminaire / Dark Zone',
+    autoDesc: 'AI Vision detected an unlit streetlamp luminaire creating a low-visibility blind spot along the public walkway during night hours.',
+  },
+  {
+    id: 'drainage',
+    name: 'Drainage Blockage',
+    baseRisk: 30,
+    deptId: 'dept-drainage',
+    icon: Layers,
+    color: '#10b981',
+    bg: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+    autoTitle: 'Clogged Stormwater Drain & Stagnant Waterlogging',
+    autoDesc: 'AI Vision detected silt and plastic debris obstructing the stormwater grate, causing stagnant backflow and mosquito breeding risk.',
+  },
+];
+
+const DEPARTMENTS = [
+  { id: 'dept-roads', name: 'Civil & Roads Engineering', slaHours: 48 },
+  { id: 'dept-sanitation', name: 'Solid Waste & Sanitation', slaHours: 24 },
+  { id: 'dept-water', name: 'Water Supply & Hydraulics', slaHours: 18 },
+  { id: 'dept-electrical', name: 'Electrical & Street Lighting', slaHours: 36 },
+  { id: 'dept-drainage', name: 'Stormwater & Drainage Div.', slaHours: 24 },
+];
+
+const STAFF_MEMBERS = [
+  { id: 'staff-1', name: 'Ramesh Verma (JE Civil)', deptId: 'dept-roads', route: 'Route A' },
+  { id: 'staff-2', name: 'Sunita Patel (Sanitation Sup.)', deptId: 'dept-sanitation', route: 'Route A' },
+  { id: 'staff-3', name: 'Anil Sharma (Water Tech)', deptId: 'dept-water', route: 'Route B' },
+  { id: 'staff-4', name: 'Vikram Singh (Electrical)', deptId: 'dept-electrical', route: 'Route C' },
+  { id: 'staff-5', name: 'Deepak Nair (Drainage Eng)', deptId: 'dept-drainage', route: 'Route D' },
+];
+
+const INSPECTION_ROUTES = [
+  { id: 'Route A', name: 'Route A - North Zone (MP Nagar & Link Rd)', color: '#3b82f6' },
+  { id: 'Route B', name: 'Route B - Central Corridor (New Market & TT Nagar)', color: '#10b981' },
+  { id: 'Route C', name: 'Route C - South Sector (Arera Colony & Bittan)', color: '#f59e0b' },
+  { id: 'Route D', name: 'Route D - East Ward (Habibganj & ISBT)', color: '#ef4444' },
+];
+
+// Bhopal Bounding Box for interactive GIS mapping (Center: 23.2599° N, 77.4126° E)
+const MAP_BOUNDS = {
+  latMax: 23.2660,
+  latMin: 23.2540,
+  lngMin: 77.4050,
+  lngMax: 77.4200,
+};
+
+const MAP_LANDMARKS = [
+  { name: 'MP Nagar Zone-I Square', x: 25, y: 26, lat: 23.2629, lng: 77.4088, route: 'Route A' },
+  { name: 'DB City & Board Office', x: 74, y: 24, lat: 23.2631, lng: 77.4161, route: 'Route A' },
+  { name: 'New Market Central Chowk', x: 50, y: 50, lat: 23.2599, lng: 77.4126, route: 'Route B' },
+  { name: 'Arera Colony E-3 Gate', x: 24, y: 74, lat: 23.2571, lng: 77.4086, route: 'Route C' },
+  { name: 'Rani Kamlapati Station Rd', x: 76, y: 72, lat: 23.2574, lng: 77.4164, route: 'Route D' },
+];
+
+const INITIAL_USERS = [
+  { phone: '+91 98260 11223', name: 'Aarav Sharma', points: 170, verifiedReports: 3, resolvedReports: 2, badge: 'Civic Guardian' },
+  { phone: '+91 94250 44556', name: 'Priya Nair', points: 120, verifiedReports: 2, resolvedReports: 2, badge: 'Ward Sentinel' },
+  { phone: '+91 99812 77889', name: 'Rohan Joshi', points: 70, verifiedReports: 2, resolvedReports: 1, badge: 'Active Citizen' },
+  { phone: '+91 91790 33445', name: 'Sneha Tiwari', points: 50, verifiedReports: 1, resolvedReports: 1, badge: 'Green Scout' },
+];
+
+const generateIssueSVG = (category, mode = 'before', geoText = '23.2599° N, 77.4126° E') => {
+  const configs = {
+    pothole: {
+      bg: '#334155',
+      accent: mode === 'before' ? '#0f172a' : '#64748b',
+      label: mode === 'before' ? 'DEEP ASPHALT POTHOLE' : 'COMPACTED COLD-MIX PATCH',
+      sub: mode === 'before' ? 'AI Vision: 95% Match | Depth ~15cm' : 'Surface Level Restored & Sealed',
+    },
+    garbage: {
+      bg: '#4d7c0f',
+      accent: mode === 'before' ? '#b45309' : '#84cc16',
+      label: mode === 'before' ? 'OVERFLOWING WASTE DUMP' : 'CLEARED & SANITIZED ZONE',
+      sub: mode === 'before' ? 'AI Vision: 92% Match | Bio-Waste Risk' : 'Tipper Cleared & Disinfected',
+    },
+    water_leakage: {
+      bg: '#0369a1',
+      accent: mode === 'before' ? '#38bdf8' : '#1e293b',
+      label: mode === 'before' ? 'BURST DISTRIBUTION PIPE' : 'VALVE & FLANGE SEALED',
+      sub: mode === 'before' ? 'AI Vision: 91% Match | Active Flow' : 'Zero Leakage Pressure Tested',
+    },
+    streetlight: {
+      bg: '#1e1b4b',
+      accent: mode === 'before' ? '#312e81' : '#facc15',
+      label: mode === 'before' ? 'DARK STREETLIGHT POLE' : '120W LED DRIVER REPLACED',
+      sub: mode === 'before' ? 'AI Vision: 89% Match | 0 Lux' : 'Full Illumination Restored',
+    },
+    drainage: {
+      bg: '#065f46',
+      accent: mode === 'before' ? '#78350f' : '#10b981',
+      label: mode === 'before' ? 'CLOGGED STORM DRAIN' : 'DESILTED & FLOWING DRAIN',
+      sub: mode === 'before' ? 'AI Vision: 93% Match | Silt Block' : 'Grate Cleared & Free Flow',
+    },
+  };
+  const c = configs[category] || configs.pothole;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="440" height="260" viewBox="0 0 440 260">
+    <rect width="440" height="260" fill="${c.bg}"/>
+    <circle cx="220" cy="115" r="68" fill="${c.accent}" opacity="0.88"/>
+    <path d="M30 205 L410 205" stroke="rgba(255,255,255,0.22)" stroke-width="3" stroke-dasharray="10 8"/>
+    <rect x="16" y="14" width="128" height="24" rx="5" fill="rgba(0,0,0,0.65)"/>
+    <text x="80" y="30" font-family="monospace" font-size="11" font-weight="bold" fill="#38bdf8" text-anchor="middle">${mode.toUpperCase()} GEO-PROOF</text>
+    <text x="220" y="114" font-family="sans-serif" font-size="15" font-weight="bold" fill="#fff" text-anchor="middle">${c.label}</text>
+    <text x="220" y="135" font-family="sans-serif" font-size="11" fill="rgba(255,255,255,0.85)" text-anchor="middle">${c.sub}</text>
+    <rect x="0" y="224" width="440" height="36" fill="rgba(2,6,23,0.85)"/>
+    <text x="14" y="246" font-family="monospace" font-size="11" fill="#a7f3d0">GPS: ${geoText} | VERIFIED STAMP</text>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
+const INITIAL_COMPLAINTS = [
+  {
+    id: 'CMP-1041',
+    title: 'Deep Asphalt Pothole & Road Surface Crater',
+    category: 'pothole',
+    description: 'AI Vision detected a structural road depression (~15cm depth) near MP Nagar Zone-I turning radius posing high skidding risk.',
+    x: 25,
+    y: 26,
+    lat: 23.2629,
+    lng: 77.4088,
+    address: 'MP Nagar Zone-I Square, Bhopal',
+    route: 'Route A',
+    status: 'Assigned',
+    departmentId: 'dept-roads',
+    staffId: 'staff-1',
+    reporterPhone: '+91 98260 11223',
+    reporterName: 'Aarav Sharma',
+    pointsAwarded: false,
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 16).toISOString(),
+    updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 12).toISOString(),
+    safetyRisk: 28,
+    upvotes: 3,
+    manualPriorityOverride: null,
+    aiPrediction: { predictedCategory: 'pothole', confidence: 0.95, modelVersion: 'MobileNetV3-Civic-v2.1', manualOverride: false },
+    beforeImage: generateIssueSVG('pothole', 'before', '23.2629° N, 77.4088° E'),
+    afterImage: null,
+    adminNote: 'High commuter traffic corridor. Patch with cold-mix asphalt urgently.',
+    staffNote: '',
+    feedback: null,
+    history: [
+      { status: 'Open', by: 'Aarav Sharma (+91 98260 11223)', note: 'Submitted via Live Geo-Camera (+10 Civic Pts)', time: '16h ago' },
+      { status: 'Assigned', by: 'Admin Dispatch', note: 'Dispatched to Ramesh Verma (Route A)', time: '12h ago' },
+    ],
+  },
+  {
+    id: 'CMP-1042',
+    title: 'Overflowing Municipal Solid Waste & Litter Pile',
+    category: 'garbage',
+    description: 'AI Vision identified uncollected garbage accumulation spilling onto DB City service lane, creating hygiene hazards.',
+    x: 74,
+    y: 24,
+    lat: 23.2631,
+    lng: 77.4161,
+    address: 'DB City & Board Office Service Rd, Bhopal',
+    route: 'Route A',
+    status: 'In Progress',
+    departmentId: 'dept-sanitation',
+    staffId: 'staff-2',
+    reporterPhone: '+91 94250 44556',
+    reporterName: 'Priya Nair',
+    pointsAwarded: false,
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 9).toISOString(),
+    updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
+    safetyRisk: 18,
+    upvotes: 2,
+    manualPriorityOverride: null,
+    aiPrediction: { predictedCategory: 'garbage', confidence: 0.92, modelVersion: 'MobileNetV3-Civic-v2.1', manualOverride: false },
+    beforeImage: generateIssueSVG('garbage', 'before', '23.2631° N, 77.4161° E'),
+    afterImage: null,
+    adminNote: 'Deploy compact tipper vehicle on Route A morning shift.',
+    staffNote: 'Crew on-site clearing secondary waste spill.',
+    feedback: null,
+    history: [
+      { status: 'Open', by: 'Priya Nair (+91 94250 44556)', note: 'Submitted with AI Auto-Fill (+10 Civic Pts)', time: '9h ago' },
+      { status: 'In Progress', by: 'Sunita Patel', note: 'Sanitation loader reached spot', time: '2h ago' },
+    ],
+  },
+  {
+    id: 'CMP-1043',
+    title: 'Pressurized Supply Pipeline Burst / Joint Leakage',
+    category: 'water_leakage',
+    description: 'AI Vision detected active clean water discharge pooling along New Market Central Chowk kerb.',
+    x: 50,
+    y: 50,
+    lat: 23.2599,
+    lng: 77.4126,
+    address: 'New Market Central Chowk, Bhopal',
+    route: 'Route B',
+    status: 'Open',
+    departmentId: 'dept-water',
+    staffId: '',
+    reporterPhone: '+91 99812 77889',
+    reporterName: 'Rohan Joshi',
+    pointsAwarded: false,
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
+    updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
+    safetyRisk: 27,
+    upvotes: 4,
+    manualPriorityOverride: null,
+    aiPrediction: { predictedCategory: 'water_leakage', confidence: 0.91, modelVersion: 'MobileNetV3-Civic-v2.1', manualOverride: false },
+    beforeImage: generateIssueSVG('water_leakage', 'before', '23.2599° N, 77.4126° E'),
+    afterImage: null,
+    adminNote: '',
+    staffNote: '',
+    feedback: null,
+    history: [
+      { status: 'Open', by: 'Rohan Joshi (+91 99812 77889)', note: 'Reported pipeline burst (+10 Civic Pts)', time: '4h ago' },
+    ],
+  },
+  {
+    id: 'CMP-1044',
+    title: 'Non-Functional Streetlight Luminaire / Dark Zone',
+    category: 'streetlight',
+    description: 'AI Vision detected an unlit streetlamp luminaire creating a low-visibility blind spot near Arera Colony E-3 Gate.',
+    x: 24,
+    y: 74,
+    lat: 23.2571,
+    lng: 77.4086,
+    address: 'Arera Colony E-3 Gate, Bhopal',
+    route: 'Route C',
+    status: 'Resolved',
+    departmentId: 'dept-electrical',
+    staffId: 'staff-4',
+    reporterPhone: '+91 98260 11223',
+    reporterName: 'Aarav Sharma',
+    pointsAwarded: true,
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 30).toISOString(),
+    updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
+    safetyRisk: 24,
+    upvotes: 1,
+    manualPriorityOverride: null,
+    aiPrediction: { predictedCategory: 'streetlight', confidence: 0.89, modelVersion: 'MobileNetV3-Civic-v2.1', manualOverride: false },
+    beforeImage: generateIssueSVG('streetlight', 'before', '23.2571° N, 77.4086° E'),
+    afterImage: generateIssueSVG('streetlight', 'after', '23.2571° N, 77.4086° E'),
+    adminNote: 'Inspect feeder pillar MCB and replace faulty LED driver.',
+    staffNote: 'Replaced 120W LED driver and tested lux output. Zone unlocked.',
+    feedback: { rating: 5, comment: 'Fixed quickly and earned +50 Civic Points!' },
+    history: [
+      { status: 'Open', by: 'Aarav Sharma (+91 98260 11223)', note: 'Submitted report (+10 Civic Pts)', time: '30h ago' },
+      { status: 'Resolved', by: 'Vikram Singh', note: 'Resolved with Geo-Proof (+50 Civic Pts credited to reporter)', time: '5h ago' },
+    ],
+  },
+];
+
+// ============================================================================
+// 2. GEOSPATIAL HAVERSINE & PRIORITY SCORING UTILITIES
+// ============================================================================
+
+function calculateHaversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371e3; // Earth's radius in meters
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const dPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const dLambda = ((lng2 - lng1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(dPhi / 2) * Math.sin(dPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLambda / 2) * Math.sin(dLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
+function latLngToPercent(lat, lng) {
+  const x = ((lng - MAP_BOUNDS.lngMin) / (MAP_BOUNDS.lngMax - MAP_BOUNDS.lngMin)) * 100;
+  const y = ((MAP_BOUNDS.latMax - lat) / (MAP_BOUNDS.latMax - MAP_BOUNDS.latMin)) * 100;
+  return {
+    x: Math.max(6, Math.min(94, Number(x.toFixed(1)))),
+    y: Math.max(6, Math.min(94, Number(y.toFixed(1)))),
+  };
+}
+
+function percentToLatLng(x, y) {
+  const lat = MAP_BOUNDS.latMax - (y / 100) * (MAP_BOUNDS.latMax - MAP_BOUNDS.latMin);
+  const lng = MAP_BOUNDS.lngMin + (x / 100) * (MAP_BOUNDS.lngMax - MAP_BOUNDS.lngMin);
+  return {
+    lat: Number(lat.toFixed(5)),
+    lng: Number(lng.toFixed(5)),
+  };
+}
+
+function detectNearestLandmarkAndRoute(x, y) {
+  let nearest = MAP_LANDMARKS[0];
+  let minD = 999;
+  MAP_LANDMARKS.forEach((lm) => {
+    const d = Math.hypot(lm.x - x, lm.y - y);
+    if (d < minD) {
+      minD = d;
+      nearest = lm;
+    }
+  });
+  const address =
+    minD < 16
+      ? `Near ${nearest.name}, Bhopal`
+      : `Sector ${Math.ceil(x / 25)}-${Math.ceil(y / 25)}, Municipal Ward 12, Bhopal`;
+  return { address, route: nearest.route };
+}
+
+function computePriorityBreakdown(complaint) {
+  const cat = CATEGORIES.find((c) => c.id === complaint.category) || CATEGORIES[0];
+  const issueTypeScore = cat.baseRisk;
+  const safetyRiskScore = Math.min(30, complaint.safetyRisk || 20);
+  const hoursOld = Math.max(1, Math.floor((Date.now() - new Date(complaint.createdAt).getTime()) / (1000 * 60 * 60)));
+  const ageScore = Math.min(18, Math.round(hoursOld * 0.7));
+  const upvoteScore = Math.min(20, (complaint.upvotes || 0) * 5);
+
+  const computedTotal = Math.min(100, issueTypeScore + safetyRiskScore + ageScore + upvoteScore);
+  const finalScore =
+    complaint.manualPriorityOverride !== null && complaint.manualPriorityOverride !== undefined
+      ? complaint.manualPriorityOverride
+      : computedTotal;
+
+  let level = 'Low';
+  let badgeClass = 'bg-slate-100 text-slate-700 border-slate-300';
+  if (finalScore >= 75) {
+    level = 'Critical';
+    badgeClass = 'bg-red-100 text-red-700 border-red-300';
+  } else if (finalScore >= 55) {
+    level = 'High';
+    badgeClass = 'bg-orange-100 text-orange-700 border-orange-300';
+  } else if (finalScore >= 35) {
+    level = 'Medium';
+    badgeClass = 'bg-amber-100 text-amber-700 border-amber-300';
+  }
+
+  return {
+    issueTypeScore,
+    safetyRiskScore,
+    ageScore,
+    upvoteScore,
+    computedTotal,
+    finalScore,
+    level,
+    badgeClass,
+    isOverridden: complaint.manualPriorityOverride !== null && complaint.manualPriorityOverride !== undefined,
+  };
+}
+
+// Watermark any captured/uploaded photo with live GPS, Route, and Timestamp
+function stampPhotoWithGeoWatermark(dataUrl, { lat, lng, address, route }) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width || 640;
+      canvas.height = img.height || 400;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      const barHeight = Math.max(54, Math.round(canvas.height * 0.16));
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.82)';
+      ctx.fillRect(0, canvas.height - barHeight, canvas.width, barHeight);
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = `bold ${Math.max(12, Math.round(barHeight * 0.28))}px monospace`;
+      ctx.fillText(
+        `LIVE GEO-STAMP | ${lat.toFixed(5)}° N, ${lng.toFixed(5)}° E | ${route}`,
+        14,
+        canvas.height - barHeight + Math.round(barHeight * 0.42)
+      );
+
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = `${Math.max(11, Math.round(barHeight * 0.24))}px sans-serif`;
+      const ts = new Date().toLocaleString();
+      ctx.fillText(
+        `${address} • ${ts}`,
+        14,
+        canvas.height - barHeight + Math.round(barHeight * 0.8)
+      );
+
+      resolve(canvas.toDataURL('image/jpeg', 0.9));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+const FASTAPI_BACKEND_CODE = `# FastAPI + PostGIS Backend Snippet (OTP Auth, 100m Geofence Lock & Civic Points)
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel
+from sqlalchemy import text
+
+app = FastAPI(title="CivicPulse GIS & Gamified Grievance API")
+
+@app.post("/api/v1/auth/verify-otp")
+async def verify_otp(phone: str, otp: str):
+    if otp != "1234":  # Demo OTP verification
+        raise HTTPException(status_code=401, detail="Invalid OTP")
+    return {"access_token": "jwt_token_active", "phone": phone, "points": 170}
+
+@app.post("/api/v1/complaints")
+async def create_complaint(payload: dict, db=Depends(get_db)):
+    # Strict 100-Meter Unresolved Proximity Lock via PostGIS ST_DWithin
+    nearby_query = text("""
+        SELECT complaint_id, ST_Distance(location::geography, ST_MakePoint(:lng, :lat)::geography) AS dist_m
+        FROM complaints
+        WHERE status != 'Resolved'
+          AND ST_DWithin(location::geography, ST_MakePoint(:lng, :lat)::geography, 100)
+        LIMIT 1;
+    """)
+    existing = db.execute(nearby_query, {"lat": payload["lat"], "lng": payload["lng"]}).fetchone()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Duplicate Zone Locked: Ticket {existing.complaint_id} is {int(existing.dist_m)}m away."
+        )
+    # Insert complaint & credit +10 Civic Points to reporter phone
+    return {"status": "created", "points_credited": 10}`;
+
+const POSTGRES_SCHEMA_SQL = `-- PostgreSQL 16 + PostGIS Extension Schema
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+CREATE TABLE users (
+    phone VARCHAR(20) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    civic_points INTEGER DEFAULT 0,
+    verified_reports INTEGER DEFAULT 0,
+    resolved_reports INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE complaints (
+    complaint_id VARCHAR(20) PRIMARY KEY,
+    reporter_phone VARCHAR(20) REFERENCES users(phone),
+    category_id VARCHAR(32) NOT NULL,
+    description TEXT NOT NULL,
+    location GEOMETRY(Point, 4326) NOT NULL,
+    address VARCHAR(255),
+    route_id VARCHAR(32),
+    status VARCHAR(24) DEFAULT 'Open',
+    points_awarded BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_complaints_geom ON complaints USING GIST (location);`;
+
+// ============================================================================
+// 3. REUSABLE UI & GOOGLE MAPS / EARTH GIS COMPONENT
+// ============================================================================
+
+const StatusBadge = ({ status }) => {
+  const styles = {
+    Open: 'bg-sky-100 text-sky-800 border-sky-200',
+    Assigned: 'bg-purple-100 text-purple-800 border-purple-200',
+    'In Progress': 'bg-amber-100 text-amber-800 border-amber-200',
+    Resolved: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  };
+  return (
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${styles[status] || styles.Open}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current mr-1.5" />
+      {status}
+    </span>
+  );
+};
+
+const CategoryBadge = ({ categoryId }) => {
+  const cat = CATEGORIES.find((c) => c.id === categoryId) || CATEGORIES[0];
+  const Icon = cat.icon;
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border ${cat.bg}`}>
+      <Icon className="w-3.5 h-3.5" />
+      {cat.name}
+    </span>
+  );
+};
+
+const GoogleMapsEarthView = ({
+  complaints,
+  selectedCoords,
+  onSelectCoords,
+  interactive = false,
+  showHeatmap = false,
+  selectedRoute = 'All',
+  selectedCategory = 'All',
+  selectedStatus = 'All',
+  onSelectComplaint = null,
+}) => {
+  const [mapLayer, setMapLayer] = useState('hybrid'); // 'roadmap' | 'satellite' | 'hybrid'
+
+  const handleMapClick = (e) => {
+    if (!interactive || !onSelectCoords) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(5, Math.min(95, Math.round(((e.clientX - rect.left) / rect.width) * 100)));
+    const y = Math.max(5, Math.min(95, Math.round(((e.clientY - rect.top) / rect.height) * 100)));
+    const { lat, lng } = percentToLatLng(x, y);
+    const { address, route } = detectNearestLandmarkAndRoute(x, y);
+    onSelectCoords({ x, y, lat, lng, address, route });
+  };
+
+  const visibleComplaints = complaints.filter((c) => {
+    if (selectedRoute !== 'All' && c.route !== selectedRoute) return false;
+    if (selectedCategory !== 'All' && c.category !== selectedCategory) return false;
+    if (selectedStatus !== 'All' && c.status !== selectedStatus) return false;
+    return true;
+  });
+
+  const isDarkMap = mapLayer === 'satellite' || mapLayer === 'hybrid';
+
+  return (
+    <div
+      onClick={handleMapClick}
+      className={`relative w-full h-80 sm:h-96 rounded-2xl overflow-hidden border border-slate-300 shadow-inner select-none ${
+        interactive ? 'cursor-crosshair ring-2 ring-indigo-500/40' : ''
+      } ${isDarkMap ? 'bg-slate-950' : 'bg-slate-100'}`}
+    >
+      {/* Google Maps / Google Earth Vector & Aerial Imagery Canvas */}
+      <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <defs>
+          <pattern id="aerialTerrain" width="12" height="12" patternUnits="userSpaceOnUse">
+            <rect width="12" height="12" fill="#0b1322" />
+            <circle cx="3" cy="3" r="1.4" fill="#132238" />
+            <circle cx="9" cy="8" r="1.8" fill="#0f292e" />
+            <path d="M0 6 L12 6 M6 0 L6 12" stroke="#16243b" strokeWidth="0.3" />
+          </pattern>
+          <pattern id="roadGrid" width="10" height="10" patternUnits="userSpaceOnUse">
+            <rect width="10" height="10" fill="#f1f5f9" />
+            <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#e2e8f0" strokeWidth="0.4" />
+          </pattern>
+        </defs>
+
+        {/* Layer Base */}
+        {mapLayer === 'roadmap' ? (
+          <rect width="100" height="100" fill="url(#roadGrid)" />
+        ) : (
+          <rect width="100" height="100" fill="url(#aerialTerrain)" />
+        )}
+
+        {/* Topographic Parks, Waterbody (Upper Lake Edge) & Urban Blocks */}
+        <path
+          d="M 0 0 L 18 0 Q 22 18 12 34 L 0 38 Z"
+          fill={mapLayer === 'roadmap' ? '#bae6fd' : '#0c4a6e'}
+          opacity="0.75"
+        />
+        <rect x="20" y="10" width="24" height="24" rx="2" fill={mapLayer === 'roadmap' ? '#dcfce7' : '#064e3b'} opacity="0.65" />
+        <rect x="62" y="12" width="28" height="24" rx="2" fill={mapLayer === 'roadmap' ? '#fef3c7' : '#1e293b'} opacity="0.65" />
+        <rect x="14" y="60" width="26" height="26" rx="2" fill={mapLayer === 'roadmap' ? '#dcfce7' : '#064e3b'} opacity="0.65" />
+        <rect x="64" y="58" width="28" height="28" rx="2" fill={mapLayer === 'roadmap' ? '#e0e7ff' : '#1e1b4b'} opacity="0.65" />
+
+        {/* Municipal Inspection Route Polylines (Visible in Roadmap & Hybrid) */}
+        {mapLayer !== 'satellite' && (
+          <g>
+            {/* Route A - North Zone */}
+            <path
+              d="M 10 26 Q 50 28 90 22"
+              fill="none"
+              stroke="#3b82f6"
+              strokeWidth={selectedRoute === 'Route A' ? '2.4' : '1.3'}
+              strokeDasharray={selectedRoute === 'Route A' ? 'none' : '3 2'}
+              opacity={selectedRoute === 'All' || selectedRoute === 'Route A' ? '0.9' : '0.25'}
+            />
+            {/* Route B - Central Corridor */}
+            <path
+              d="M 50 8 L 50 92"
+              fill="none"
+              stroke="#10b981"
+              strokeWidth={selectedRoute === 'Route B' ? '2.4' : '1.3'}
+              strokeDasharray={selectedRoute === 'Route B' ? 'none' : '3 2'}
+              opacity={selectedRoute === 'All' || selectedRoute === 'Route B' ? '0.9' : '0.25'}
+            />
+            {/* Route C - South Sector */}
+            <path
+              d="M 12 75 Q 48 64 88 74"
+              fill="none"
+              stroke="#f59e0b"
+              strokeWidth={selectedRoute === 'Route C' ? '2.4' : '1.3'}
+              strokeDasharray={selectedRoute === 'Route C' ? 'none' : '3 2'}
+              opacity={selectedRoute === 'All' || selectedRoute === 'Route C' ? '0.9' : '0.25'}
+            />
+            {/* Route D - East Ward */}
+            <path
+              d="M 75 12 Q 74 50 78 88"
+              fill="none"
+              stroke="#ef4444"
+              strokeWidth={selectedRoute === 'Route D' ? '2.4' : '1.3'}
+              strokeDasharray={selectedRoute === 'Route D' ? 'none' : '3 2'}
+              opacity={selectedRoute === 'All' || selectedRoute === 'Route D' ? '0.9' : '0.25'}
+            />
+          </g>
+        )}
+
+        {/* 100-Meter Unresolved Geofence Radius Rings */}
+        {visibleComplaints
+          .filter((c) => c.status !== 'Resolved')
+          .map((c) => (
+            <g key={`fence-${c.id}`}>
+              <circle
+                cx={c.x}
+                cy={c.y}
+                r="7.5"
+                fill="rgba(239, 68, 68, 0.14)"
+                stroke="#ef4444"
+                strokeWidth="0.45"
+                strokeDasharray="1.2 1"
+              />
+            </g>
+          ))}
+
+        {/* Analytics Heatmap Overlay */}
+        {showHeatmap &&
+          visibleComplaints.map((c) => {
+            const p = computePriorityBreakdown(c);
+            const radius = p.finalScore >= 70 ? 15 : 10;
+            const color = p.finalScore >= 70 ? '#ef4444' : p.finalScore >= 50 ? '#f59e0b' : '#3b82f6';
+            return (
+              <g key={`heat-${c.id}`}>
+                <circle cx={c.x} cy={c.y} r={radius} fill={color} opacity="0.32" />
+                <circle cx={c.x} cy={c.y} r={radius * 0.45} fill={color} opacity="0.6" />
+              </g>
+            );
+          })}
+      </svg>
+
+      {/* Landmark Labels (Hidden in pure Satellite mode like Google Earth) */}
+      {mapLayer !== 'satellite' &&
+        MAP_LANDMARKS.map((lm) => (
+          <div
+            key={lm.name}
+            style={{ left: `${lm.x}%`, top: `${lm.y}%` }}
+            className={`absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none text-[10px] font-semibold px-1.5 py-0.5 rounded shadow-xs whitespace-nowrap ${
+              mapLayer === 'roadmap'
+                ? 'bg-white/95 text-slate-700 border border-slate-200'
+                : 'bg-slate-950/80 text-slate-200 border border-slate-700/80'
+            }`}
+          >
+            {lm.name}
+          </div>
+        ))}
+
+      {/* Complaint Markers */}
+      {visibleComplaints.map((c) => {
+        const cat = CATEGORIES.find((item) => item.id === c.category) || CATEGORIES[0];
+        const isResolved = c.status === 'Resolved';
+        return (
+          <button
+            type="button"
+            key={c.id}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onSelectComplaint) onSelectComplaint(c);
+            }}
+            style={{ left: `${c.x}%`, top: `${c.y}%`, backgroundColor: isResolved ? '#10b981' : cat.color }}
+            title={`${c.id}: ${c.title} (${c.status}) — ${isResolved ? '100m Zone Unlocked' : '100m Geofence Active'}`}
+            className={`absolute -translate-x-1/2 -translate-y-1/2 w-7 h-7 rounded-full border-2 border-white shadow-xl flex items-center justify-center text-white text-[10px] font-bold transition-transform hover:scale-125 z-20 ${
+              isResolved ? 'opacity-80' : ''
+            }`}
+          >
+            {isResolved ? <Check className="w-3.5 h-3.5" /> : c.id.slice(-2)}
+          </button>
+        );
+      })}
+
+      {/* Live Pulsing User GPS Pin */}
+      {selectedCoords && (
+        <div
+          style={{ left: `${selectedCoords.x}%`, top: `${selectedCoords.y}%` }}
+          className="absolute -translate-x-1/2 -translate-y-full z-40 pointer-events-none flex flex-col items-center"
+        >
+          <div className="bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-lg whitespace-nowrap mb-0.5 border border-indigo-400">
+            Live GPS: {selectedCoords.lat}°N, {selectedCoords.lng}°E
+          </div>
+          <div className="relative flex items-center justify-center">
+            <span className="animate-ping absolute inline-flex h-7 w-7 rounded-full bg-indigo-400 opacity-75" />
+            <MapPin className="w-8 h-8 text-indigo-500 fill-indigo-600 drop-shadow-xl relative z-10" />
+          </div>
+        </div>
+      )}
+
+      {/* Top-Left Live GPS Telemetry Pill */}
+      <div className="absolute top-3 left-3 bg-slate-950/85 backdrop-blur-md text-white px-2.5 py-1.5 rounded-xl border border-slate-700/80 text-[10px] font-mono flex items-center gap-2 z-30 shadow-lg">
+        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+        <span>Google Earth / GIS Live</span>
+      </div>
+
+      {/* Top-Right Google Maps / Earth Layer Switcher */}
+      <div className="absolute top-3 right-3 flex items-center bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-slate-200 p-1 z-30 text-xs">
+        {[
+          { id: 'roadmap', label: 'Roadmap' },
+          { id: 'satellite', label: 'Satellite' },
+          { id: 'hybrid', label: 'Hybrid' },
+        ].map((layer) => (
+          <button
+            key={layer.id}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMapLayer(layer.id);
+            }}
+            className={`px-2.5 py-1 rounded-lg font-semibold transition-colors ${
+              mapLayer === layer.id ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            {layer.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Bottom Legend Bar */}
+      <div className="absolute bottom-2 left-2 right-2 flex flex-wrap items-center justify-between gap-2 bg-slate-950/85 backdrop-blur-sm px-3 py-1.5 rounded-xl border border-slate-800 text-[11px] text-slate-300 pointer-events-none">
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full border border-red-400 bg-red-500/30 inline-block" />
+          <span>Red Ring = 100m Unresolved Lock Zone</span>
+        </span>
+        <div className="flex items-center gap-2.5">
+          {CATEGORIES.slice(0, 4).map((cat) => (
+            <span key={cat.id} className="inline-flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
+              <span className="hidden sm:inline text-slate-200">{cat.name}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// 4. MAIN CIVICPULSE FULL-STACK APPLICATION
+// ============================================================================
+
+export default function App() {
+  // Active Role & Navigation
+  const [activeRole, setActiveRole] = useState('citizen'); // 'citizen' | 'admin' | 'staff' | 'analytics' | 'leaderboard'
+
+  // Persistent Complaints State
+  const [complaints, setComplaints] = useState(() => {
+    try {
+      const saved = localStorage.getItem('civicpulse_complaints_v3');
+      return saved ? JSON.parse(saved) : INITIAL_COMPLAINTS;
+    } catch {
+      return INITIAL_COMPLAINTS;
+    }
+  });
+
+  // Persistent Users & Civic Points Gamification State
+  const [users, setUsers] = useState(() => {
+    try {
+      const saved = localStorage.getItem('civicpulse_users_v3');
+      return saved ? JSON.parse(saved) : INITIAL_USERS;
+    } catch {
+      return INITIAL_USERS;
+    }
+  });
+
+  // Logged-In User (Phone Number OTP Auth)
+  const [currentUserPhone, setCurrentUserPhone] = useState('+91 98260 11223');
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authPhoneInput, setAuthPhoneInput] = useState('+91 98260 55667');
+  const [authNameInput, setAuthNameInput] = useState('Vikramaditya Rao');
+  const [authOtpSent, setAuthOtpSent] = useState(false);
+  const [authOtpInput, setAuthOtpInput] = useState('1234');
+
+  const currentUser = useMemo(() => {
+    return (
+      users.find((u) => u.phone === currentUserPhone) || {
+        phone: currentUserPhone,
+        name: 'Verified Citizen',
+        points: 0,
+        verifiedReports: 0,
+        resolvedReports: 0,
+        badge: 'New Citizen',
+      }
+    );
+  }, [users, currentUserPhone]);
+
+  // Backend API & PostGIS Inspector State
+  const [apiLogs, setApiLogs] = useState([
+    {
+      id: 'req-init-1',
+      method: 'POST',
+      endpoint: '/api/v1/auth/verify-otp',
+      status: 200,
+      latency: '22ms',
+      timestamp: new Date().toLocaleTimeString(),
+      payload: { phone: '+91 98260 11223', verified: true, civic_points: 170 },
+    },
+    {
+      id: 'req-init-2',
+      method: 'GET',
+      endpoint: '/api/v1/complaints?geofence_lock=100m&crs=EPSG:4326',
+      status: 200,
+      latency: '31ms',
+      timestamp: new Date().toLocaleTimeString(),
+      payload: { active_locks: 3, resolved_unlocked: 1 },
+    },
+  ]);
+  const [showBackendDrawer, setShowBackendDrawer] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState('logs'); // 'logs' | 'fastapi' | 'sql'
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('civicpulse_complaints_v3', JSON.stringify(complaints));
+    } catch {}
+  }, [complaints]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('civicpulse_users_v3', JSON.stringify(users));
+    } catch {}
+  }, [users]);
+
+  const triggerToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4800);
+  };
+
+  const logApiCall = (method, endpoint, payload, status = 200) => {
+    const entry = {
+      id: `req-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      method,
+      endpoint,
+      status,
+      latency: `${Math.floor(18 + Math.random() * 35)}ms`,
+      timestamp: new Date().toLocaleTimeString(),
+      payload,
+    };
+    setApiLogs((prev) => [entry, ...prev.slice(0, 29)]);
+  };
+
+  // ==========================================================================
+  // OTP LOGIN / REGISTRATION HANDLERS
+  // ==========================================================================
+  const handleSendOtp = (e) => {
+    e.preventDefault();
+    if (!authPhoneInput.trim() || authPhoneInput.trim().length < 10) {
+      triggerToast('Enter a valid 10-digit mobile number (+91).', 'error');
+      return;
+    }
+    setAuthOtpSent(true);
+    setAuthOtpInput('1234');
+    logApiCall('POST', '/api/v1/auth/send-otp', { phone: authPhoneInput.trim(), demo_otp: '1234' }, 200);
+    triggerToast(`OTP sent to ${authPhoneInput.trim()} (Demo OTP: 1234)`, 'info');
+  };
+
+  const handleVerifyOtp = (e) => {
+    e.preventDefault();
+    if (authOtpInput.trim() !== '1234') {
+      triggerToast('Invalid OTP. Use demo OTP 1234.', 'error');
+      return;
+    }
+    const formattedPhone = authPhoneInput.trim();
+    const existing = users.find((u) => u.phone === formattedPhone);
+    if (!existing) {
+      const newUser = {
+        phone: formattedPhone,
+        name: authNameInput.trim() || 'Citizen Reporter',
+        points: 20, // Welcome bonus
+        verifiedReports: 0,
+        resolvedReports: 0,
+        badge: 'New Citizen',
+      };
+      setUsers((prev) => [newUser, ...prev]);
+      triggerToast(`Welcome ${newUser.name}! +20 Welcome Civic Points credited.`);
+    } else {
+      triggerToast(`Logged in as ${existing.name} (${existing.points} Civic Points).`);
+    }
+    setCurrentUserPhone(formattedPhone);
+    setShowAuthModal(false);
+    setAuthOtpSent(false);
+    logApiCall('POST', '/api/v1/auth/verify-otp', { phone: formattedPhone, status: 'authenticated' }, 200);
+  };
+
+  // ==========================================================================
+  // CITIZEN PORTAL: AUTO GPS, LIVE CAMERA, AI AUTO-FILL & 100M LOCK
+  // ==========================================================================
+  const [citizenTab, setCitizenTab] = useState('report'); // 'report' | 'history'
+  const [coords, setCoords] = useState({
+    x: 42,
+    y: 44,
+    lat: 23.2607,
+    lng: 77.4113,
+    address: 'TT Nagar Link Road, Bhopal',
+    route: 'Route B',
+  });
+  const [isLocating, setIsLocating] = useState(false);
+  const [gpsSource, setGpsSource] = useState('Bhopal Default GIS');
+
+  // Form fields (Auto-filled on image upload/capture, editable via Manual Override)
+  const [category, setCategory] = useState('pothole');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [safetyRisk, setSafetyRisk] = useState(25);
+  const [uploadedPhoto, setUploadedPhoto] = useState(null);
+  const [aiResult, setAiResult] = useState(null);
+  const [isClassifying, setIsClassifying] = useState(false);
+  const [manualOverrideMode, setManualOverrideMode] = useState(false);
+  const [feedbackDrafts, setFeedbackDrafts] = useState({});
+
+  // Live Camera Modal State
+  const [showCameraModal, setShowCameraModal] = useState(false);
+  const [cameraStreamActive, setCameraStreamActive] = useState(false);
+  const [cameraSimCategory, setCameraSimCategory] = useState('pothole');
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+
+  const fetchCurrentLocation = () => {
+    setIsLocating(true);
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const rawLat = pos.coords.latitude;
+          const rawLng = pos.coords.longitude;
+          // If user is within Bhopal bounding box use exact coords, otherwise map cleanly into Bhopal demo ward while displaying real GPS telemetry
+          const inBhopal =
+            rawLat >= MAP_BOUNDS.latMin &&
+            rawLat <= MAP_BOUNDS.latMax &&
+            rawLng >= MAP_BOUNDS.lngMin &&
+            rawLng <= MAP_BOUNDS.lngMax;
+
+          if (inBhopal) {
+            const { x, y } = latLngToPercent(rawLat, rawLng);
+            const { address, route } = detectNearestLandmarkAndRoute(x, y);
+            setCoords({ x, y, lat: Number(rawLat.toFixed(5)), lng: Number(rawLng.toFixed(5)), address, route });
+          } else {
+            // Keep realistic Bhopal coordinates around New Market / TT Nagar so 100m geofence testing works seamlessly
+            const lat = Number((23.2608 + (Math.random() - 0.5) * 0.0012).toFixed(5));
+            const lng = Number((77.4115 + (Math.random() - 0.5) * 0.0012).toFixed(5));
+            const { x, y } = latLngToPercent(lat, lng);
+            const { address, route } = detectNearestLandmarkAndRoute(x, y);
+            setCoords({ x, y, lat, lng, address, route });
+          }
+          setGpsSource(`Device GPS (±${Math.round(pos.coords.accuracy)}m)`);
+          setIsLocating(false);
+          logApiCall('GET', '/api/v1/gis/reverse-geocode', { lat: rawLat.toFixed(5), lng: rawLng.toFixed(5) }, 200);
+          triggerToast('Current GPS location locked & reverse-geocoded!');
+        },
+        () => {
+          const lat = 23.2612;
+          const lng = 77.4118;
+          const { x, y } = latLngToPercent(lat, lng);
+          const { address, route } = detectNearestLandmarkAndRoute(x, y);
+          setCoords({ x, y, lat, lng, address, route });
+          setGpsSource('Bhopal Ward-12 GPS Fallback');
+          setIsLocating(false);
+          triggerToast('Centered on Bhopal Ward-12 GPS coordinates.', 'info');
+        },
+        { enableHighAccuracy: true, timeout: 6000 }
+      );
+    } else {
+      setIsLocating(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCurrentLocation();
+  }, []);
+
+  // Strict 100-Meter Unresolved Proximity Lock (Checks ALL unresolved tickets within 100m!)
+  const unresolvedWithin100m = useMemo(() => {
+    return complaints
+      .filter((c) => c.status !== 'Resolved')
+      .map((c) => ({
+        ...c,
+        distanceMeters: calculateHaversineMeters(coords.lat, coords.lng, c.lat, c.lng),
+      }))
+      .filter((c) => c.distanceMeters <= 100)
+      .sort((a, b) => a.distanceMeters - b.distanceMeters);
+  }, [complaints, coords]);
+
+  // Instant AI Image Analysis & Automatic Form Fill
+  const analyzeImageAndAutoFill = async (sourceHint = '', rawImageUrl = null, explicitCat = null) => {
+    setIsClassifying(true);
+    let detectedCat = explicitCat;
+
+    if (!detectedCat) {
+      const lower = `${sourceHint} ${title}`.toLowerCase();
+      if (lower.includes('garb') || lower.includes('trash') || lower.includes('waste') || lower.includes('dump')) {
+        detectedCat = 'garbage';
+      } else if (lower.includes('water') || lower.includes('pipe') || lower.includes('leak')) {
+        detectedCat = 'water_leakage';
+      } else if (lower.includes('light') || lower.includes('lamp') || lower.includes('pole') || lower.includes('dark')) {
+        detectedCat = 'streetlight';
+      } else if (lower.includes('drain') || lower.includes('sewer') || lower.includes('clog') || lower.includes('flood')) {
+        detectedCat = 'drainage';
+      } else if (lower.includes('pot') || lower.includes('road') || lower.includes('crack') || lower.includes('hole')) {
+        detectedCat = 'pothole';
+      } else {
+        // Rotate deterministically among categories for generic image filenames
+        const idx = Math.floor(Math.random() * CATEGORIES.length);
+        detectedCat = CATEGORIES[idx].id;
+      }
+    }
+
+    const catObj = CATEGORIES.find((c) => c.id === detectedCat) || CATEGORIES[0];
+    const confidence = Number((0.89 + Math.random() * 0.09).toFixed(2));
+    const geoText = `${coords.lat.toFixed(4)}° N, ${coords.lng.toFixed(4)}° E`;
+
+    let finalStampedImage = rawImageUrl;
+    if (rawImageUrl) {
+      finalStampedImage = await stampPhotoWithGeoWatermark(rawImageUrl, coords);
+    } else {
+      finalStampedImage = generateIssueSVG(detectedCat, 'before', geoText);
+    }
+
+    setTimeout(() => {
+      setCategory(detectedCat);
+      setTitle(`${catObj.autoTitle} at ${coords.address.split(',')[0]}`);
+      setDescription(`${catObj.autoDesc} Geo-tagged at ${coords.address} (${coords.route}).`);
+      setSafetyRisk(catObj.baseRisk);
+      setUploadedPhoto(finalStampedImage);
+      setAiResult({
+        predictedCategory: detectedCat,
+        confidence,
+        modelVersion: 'MobileNetV3-Civic-v2.1',
+        manualOverride: false,
+      });
+      setManualOverrideMode(false);
+      setIsClassifying(false);
+
+      logApiCall(
+        'POST',
+        '/api/v1/ai/vision-autofill',
+        {
+          predicted_category: detectedCat,
+          confidence,
+          auto_filled_dept: catObj.deptId,
+          geo_watermark: geoText,
+        },
+        200
+      );
+      triggerToast(`AI Auto-Filled all details as "${catObj.name}" (${Math.round(confidence * 100)}% confidence)!`);
+    }, 450);
+  };
+
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      analyzeImageAndAutoFill(file.name, reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Open Live Camera Modal (WebRTC with graceful sandbox viewfinder fallback)
+  const openLiveCamera = async () => {
+    setShowCameraModal(true);
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        streamRef.current = stream;
+        setCameraStreamActive(true);
+        setTimeout(() => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+          }
+        }, 100);
+      } else {
+        setCameraStreamActive(false);
+      }
+    } catch {
+      setCameraStreamActive(false);
+    }
+  };
+
+  const closeLiveCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    setCameraStreamActive(false);
+    setShowCameraModal(false);
+  };
+
+  const captureFromLiveCamera = () => {
+    if (cameraStreamActive && videoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth || 640;
+      canvas.height = videoRef.current.videoHeight || 400;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+      const rawDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      closeLiveCamera();
+      analyzeImageAndAutoFill(cameraSimCategory, rawDataUrl, cameraSimCategory);
+    } else {
+      // Simulated Live Viewfinder Capture with Geo-Watermark
+      closeLiveCamera();
+      analyzeImageAndAutoFill(cameraSimCategory, null, cameraSimCategory);
+    }
+  };
+
+  const handleSubmitComplaint = (e) => {
+    e.preventDefault();
+    if (!title.trim() || !description.trim()) {
+      triggerToast('Please upload/capture an image or fill in issue details.', 'error');
+      return;
+    }
+
+    if (unresolvedWithin100m.length > 0) {
+      triggerToast(
+        `Submission Blocked: Unresolved issue ${unresolvedWithin100m[0].id} is ${unresolvedWithin100m[0].distanceMeters}m away!`,
+        'error'
+      );
+      return;
+    }
+
+    const catObj = CATEGORIES.find((c) => c.id === category) || CATEGORIES[0];
+    const newId = `CMP-${1045 + complaints.length}`;
+    const geoText = `${coords.lat.toFixed(4)}° N, ${coords.lng.toFixed(4)}° E`;
+
+    const newComplaint = {
+      id: newId,
+      title: title.trim(),
+      category,
+      description: description.trim(),
+      x: coords.x,
+      y: coords.y,
+      lat: coords.lat,
+      lng: coords.lng,
+      address: coords.address,
+      route: coords.route,
+      status: 'Open',
+      departmentId: catObj.deptId,
+      staffId: '',
+      reporterPhone: currentUser.phone,
+      reporterName: currentUser.name,
+      pointsAwarded: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      safetyRisk: Number(safetyRisk),
+      upvotes: 1,
+      manualPriorityOverride: null,
+      aiPrediction: aiResult
+        ? { ...aiResult, manualOverride: manualOverrideMode }
+        : { predictedCategory: category, confidence: 0.9, modelVersion: 'MobileNetV3-Civic-v2.1', manualOverride: manualOverrideMode },
+      beforeImage: uploadedPhoto || generateIssueSVG(category, 'before', geoText),
+      afterImage: null,
+      adminNote: '',
+      staffNote: '',
+      feedback: null,
+      history: [
+        {
+          status: 'Open',
+          by: `${currentUser.name} (${currentUser.phone})`,
+          note: 'Submitted with Geo-Stamped Photo (+10 Civic Points)',
+          time: 'Just now',
+        },
+      ],
+    };
+
+    setComplaints((prev) => [newComplaint, ...prev]);
+
+    // Award +10 Civic Points immediately for verified geo-tagged submission
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.phone === currentUser.phone
+          ? {
+              ...u,
+              points: u.points + 10,
+              verifiedReports: u.verifiedReports + 1,
+              badge: u.points + 10 >= 150 ? 'Civic Guardian' : u.points + 10 >= 80 ? 'Ward Sentinel' : 'Active Citizen',
+            }
+          : u
+      )
+    );
+
+    logApiCall(
+      'POST',
+      '/api/v1/complaints',
+      { complaint_id: newId, reporter_phone: currentUser.phone, route: coords.route, points_credited: 10 },
+      201
+    );
+
+    setTitle('');
+    setDescription('');
+    setUploadedPhoto(null);
+    setAiResult(null);
+    setCitizenTab('history');
+    triggerToast(`Complaint ${newId} registered! +10 Civic Points credited to ${currentUser.phone}.`);
+  };
+
+  const handleUpvoteExistingTicket = (existingTicket) => {
+    setComplaints((prev) =>
+      prev.map((c) =>
+        c.id === existingTicket.id
+          ? {
+              ...c,
+              upvotes: (c.upvotes || 0) + 1,
+              history: [
+                ...c.history,
+                {
+                  status: c.status,
+                  by: `${currentUser.name} (${currentUser.phone})`,
+                  note: 'Upvoted nearby unresolved issue (+1 priority weight)',
+                  time: 'Just now',
+                },
+              ],
+            }
+          : c
+      )
+    );
+    logApiCall('POST', `/api/v1/complaints/${existingTicket.id}/upvote`, { phone: currentUser.phone }, 200);
+    triggerToast(`Upvoted ${existingTicket.id}! Priority score boosted without creating duplicate clutter.`);
+  };
+
+  const handleCitizenFeedback = (complaintId) => {
+    const draft = feedbackDrafts[complaintId] || { rating: 5, comment: '' };
+    setComplaints((prev) =>
+      prev.map((c) =>
+        c.id === complaintId
+          ? { ...c, feedback: { rating: Number(draft.rating), comment: draft.comment || 'Verified resolution!' } }
+          : c
+      )
+    );
+    triggerToast('Thank you! Citizen satisfaction rating saved.');
+  };
+
+  // ==========================================================================
+  // ADMIN ROUTE-WISE DISPATCH STATE & HANDLERS
+  // ==========================================================================
+  const [adminRouteFilter, setAdminRouteFilter] = useState('All');
+  const [adminCategoryFilter, setAdminCategoryFilter] = useState('All');
+  const [adminStatusFilter, setAdminStatusFilter] = useState('All');
+  const [selectedAdminTicket, setSelectedAdminTicket] = useState(null);
+  const [assignDept, setAssignDept] = useState('');
+  const [assignStaff, setAssignStaff] = useState('');
+  const [adminNoteInput, setAdminNoteInput] = useState('');
+  const [priorityOverrideInput, setPriorityOverrideInput] = useState('');
+
+  const filteredAdminComplaints = useMemo(() => {
+    return complaints
+      .filter((c) => (adminRouteFilter === 'All' ? true : c.route === adminRouteFilter))
+      .filter((c) => (adminCategoryFilter === 'All' ? true : c.category === adminCategoryFilter))
+      .filter((c) => (adminStatusFilter === 'All' ? true : c.status === adminStatusFilter))
+      .sort((a, b) => computePriorityBreakdown(b).finalScore - computePriorityBreakdown(a).finalScore);
+  }, [complaints, adminRouteFilter, adminCategoryFilter, adminStatusFilter]);
+
+  const handleSaveDispatch = () => {
+    if (!selectedAdminTicket) return;
+    const overrideVal =
+      priorityOverrideInput.trim() === '' ? null : Math.max(0, Math.min(100, Number(priorityOverrideInput)));
+    const nextStatus = assignStaff && selectedAdminTicket.status === 'Open' ? 'Assigned' : selectedAdminTicket.status;
+
+    setComplaints((prev) =>
+      prev.map((c) =>
+        c.id === selectedAdminTicket.id
+          ? {
+              ...c,
+              departmentId: assignDept,
+              staffId: assignStaff,
+              status: nextStatus,
+              adminNote: adminNoteInput,
+              manualPriorityOverride: overrideVal,
+              updatedAt: new Date().toISOString(),
+              history: [
+                ...c.history,
+                {
+                  status: nextStatus,
+                  by: 'Admin Dispatch',
+                  note: `Assigned to ${STAFF_MEMBERS.find((s) => s.id === assignStaff)?.name || 'Department Queue'} (${c.route})`,
+                  time: 'Just now',
+                },
+              ],
+            }
+          : c
+      )
+    );
+    logApiCall('PATCH', `/api/v1/complaints/${selectedAdminTicket.id}/dispatch`, { staffId: assignStaff, status: nextStatus }, 200);
+    setSelectedAdminTicket(null);
+    triggerToast(`Ticket ${selectedAdminTicket.id} dispatched on ${selectedAdminTicket.route}!`);
+  };
+
+  // ==========================================================================
+  // FIELD STAFF WORKSPACE & AUTOMATIC +50 CIVIC POINTS CREDIT ON RESOLUTION
+  // ==========================================================================
+  const [activeStaffId, setActiveStaffId] = useState('staff-1');
+  const [staffRouteFilter, setStaffRouteFilter] = useState('All');
+  const [staffNotesDraft, setStaffNotesDraft] = useState({});
+  const [afterEvidenceDraft, setAfterEvidenceDraft] = useState({});
+
+  const staffJobs = useMemo(() => {
+    return complaints
+      .filter((c) => c.staffId === activeStaffId)
+      .filter((c) => (staffRouteFilter === 'All' ? true : c.route === staffRouteFilter));
+  }, [complaints, activeStaffId, staffRouteFilter]);
+
+  const handleStaffStatusUpdate = async (job, newStatus) => {
+    const note = (staffNotesDraft[job.id] ?? job.staffNote ?? '').trim();
+    if (newStatus === 'Resolved' && !note) {
+      triggerToast('Mandatory: Enter field resolution notes before marking Resolved.', 'error');
+      return;
+    }
+
+    const geoText = `${job.lat.toFixed(4)}° N, ${job.lng.toFixed(4)}° E`;
+    let finalAfterImg = afterEvidenceDraft[job.id] || job.afterImage;
+    if (newStatus === 'Resolved' && !finalAfterImg) {
+      finalAfterImg = generateIssueSVG(job.category, 'after', geoText);
+    }
+
+    const shouldAwardPoints = newStatus === 'Resolved' && !job.pointsAwarded;
+
+    setComplaints((prev) =>
+      prev.map((c) =>
+        c.id === job.id
+          ? {
+              ...c,
+              status: newStatus,
+              staffNote: note,
+              afterImage: finalAfterImg,
+              pointsAwarded: shouldAwardPoints ? true : c.pointsAwarded,
+              updatedAt: new Date().toISOString(),
+              history: [
+                ...c.history,
+                {
+                  status: newStatus,
+                  by: STAFF_MEMBERS.find((s) => s.id === activeStaffId)?.name || 'Field Engineer',
+                  note: shouldAwardPoints
+                    ? `${note} — 100m Geofence Unlocked & +50 Civic Points awarded to ${job.reporterPhone}`
+                    : note || `Status updated to ${newStatus}`,
+                  time: 'Just now',
+                },
+              ],
+            }
+          : c
+      )
+    );
+
+    if (shouldAwardPoints && job.reporterPhone) {
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.phone === job.reporterPhone
+            ? {
+                ...u,
+                points: u.points + 50,
+                resolvedReports: u.resolvedReports + 1,
+                badge: u.points + 50 >= 150 ? 'Civic Guardian' : u.points + 50 >= 80 ? 'Ward Sentinel' : 'Active Citizen',
+              }
+            : u
+        )
+      );
+      logApiCall(
+        'POST',
+        `/api/v1/rewards/credit`,
+        { phone: job.reporterPhone, complaint_id: job.id, points_added: 50, geofence_unlocked: true },
+        200
+      );
+      triggerToast(`Resolved! 100m map zone unlocked & +50 Civic Points credited to ${job.reporterPhone}!`);
+    } else {
+      triggerToast(`Job ${job.id} updated to ${newStatus}.`);
+    }
+  };
+
+  // Analytics KPIs
+  const analyticsStats = useMemo(() => {
+    const total = complaints.length;
+    const resolved = complaints.filter((c) => c.status === 'Resolved').length;
+    const activeLocks = total - resolved;
+    const totalPoints = users.reduce((acc, u) => acc + u.points, 0);
+    return { total, resolved, activeLocks, totalPoints };
+  }, [complaints, users]);
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
+      {/* ====================================================================
+          TOP NAVIGATION BAR WITH PHONE OTP LOGIN & CIVIC POINTS BADGE
+         ==================================================================== */}
+      <header className="sticky top-0 z-40 bg-slate-950 text-white border-b border-slate-800 shadow-lg">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap items-center justify-between py-3 gap-3">
+            {/* Brand */}
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-md">
+                <Shield className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-base sm:text-lg font-extrabold tracking-tight">CivicPulse</h1>
+                  <span className="hidden md:inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    <LocateFixed className="w-3 h-3" /> 100m GIS Lock
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 hidden sm:block">AI Geo-Camera • Route Dispatch • Citizen Rewards</p>
+              </div>
+            </div>
+
+            {/* Role & Feature Switcher */}
+            <nav className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-800 overflow-x-auto max-w-full">
+              {[
+                { id: 'citizen', label: 'Citizen Portal', icon: Camera },
+                { id: 'admin', label: 'Route Dispatch', icon: Route },
+                { id: 'staff', label: 'Field Staff', icon: Wrench },
+                { id: 'leaderboard', label: 'Civic Rewards', icon: Trophy },
+                { id: 'analytics', label: 'GIS Heatmap', icon: BarChart3 },
+              ].map((tab) => {
+                const Icon = tab.icon;
+                const active = activeRole === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveRole(tab.id)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                      active ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* Right: Logged-in Phone Badge + FastAPI Inspector */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowAuthModal(true)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs transition-colors"
+                title="Switch Mobile Number / OTP Login"
+              >
+                <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                <div className="text-left">
+                  <div className="font-bold text-slate-100 leading-none">{currentUser.phone}</div>
+                  <div className="text-[10px] text-amber-400 font-semibold flex items-center gap-1 mt-0.5">
+                    <Award className="w-3 h-3" /> {currentUser.points} Civic Pts
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setShowBackendDrawer(!showBackendDrawer)}
+                className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-slate-200 border border-slate-700 hover:bg-slate-800"
+                title="Inspect FastAPI & PostGIS Backend"
+              >
+                <Terminal className="w-4 h-4 text-emerald-400" />
+                <span className="hidden lg:inline">API & SQL</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* TOAST NOTIFICATION */}
+      {toast && (
+        <div className="fixed bottom-5 right-5 z-50 max-w-md">
+          <div
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border text-sm font-medium ${
+              toast.type === 'error'
+                ? 'bg-red-950 text-red-100 border-red-700'
+                : toast.type === 'info'
+                ? 'bg-slate-900 text-slate-100 border-slate-700'
+                : 'bg-emerald-950 text-emerald-100 border-emerald-700'
+            }`}
+          >
+            {toast.type === 'error' ? (
+              <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            )}
+            <span>{toast.message}</span>
+          </div>
+        </div>
+      )}
+
+      {/* ====================================================================
+          PHONE NUMBER OTP LOGIN & REGISTRATION MODAL
+         ==================================================================== */}
+      {showAuthModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
+                  <Phone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">Mobile Number OTP Login</h3>
+                  <p className="text-xs text-slate-500">Earn +10 pts per verified report & +50 pts when resolved!</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAuthModal(false)} className="text-slate-400 hover:text-slate-700">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {!authOtpSent ? (
+              <form onSubmit={handleSendOtp} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Citizen Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={authNameInput}
+                    onChange={(e) => setAuthNameInput(e.target.value)}
+                    placeholder="Enter your full name"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Mobile Number (+91)</label>
+                  <input
+                    type="tel"
+                    required
+                    value={authPhoneInput}
+                    onChange={(e) => setAuthPhoneInput(e.target.value)}
+                    placeholder="+91 98260 XXXXX"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md"
+                >
+                  Send 4-Digit OTP
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleVerifyOtp} className="space-y-4">
+                <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                  OTP sent to <strong>{authPhoneInput}</strong>. Use demo OTP <strong className="font-mono">1234</strong>.
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Enter 4-Digit OTP</label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    required
+                    value={authOtpInput}
+                    onChange={(e) => setAuthOtpInput(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-center text-lg font-mono font-bold tracking-widest focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAuthOtpSent(false)}
+                    className="flex-1 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-700"
+                  >
+                    Change Number
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md"
+                  >
+                    Verify & Login
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Quick Account Switcher for Demo Testing */}
+            <div className="pt-3 border-t border-slate-100">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                Quick Switch Demo Citizen Accounts
+              </div>
+              <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                {users.map((u) => (
+                  <button
+                    key={u.phone}
+                    type="button"
+                    onClick={() => {
+                      setCurrentUserPhone(u.phone);
+                      setShowAuthModal(false);
+                      triggerToast(`Switched account to ${u.name} (${u.points} Civic Pts)`);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs transition-colors ${
+                      u.phone === currentUserPhone
+                        ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>
+                      {u.name} <span className="font-mono text-[11px] text-slate-500">({u.phone})</span>
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold text-[11px]">
+                      {u.points} pts
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ====================================================================
+          LIVE CAMERA CAPTURE WITH REAL-TIME GEO-STAMP WATERMARK MODAL
+         ==================================================================== */}
+      {showCameraModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 text-white rounded-2xl max-w-lg w-full overflow-hidden border border-slate-700 shadow-2xl">
+            <div className="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Aperture className="w-5 h-5 text-red-500 animate-pulse" />
+                <span className="font-bold text-sm">Live Geo-Stamped Camera Viewfinder</span>
+              </div>
+              <button onClick={closeLiveCamera} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="relative bg-black aspect-video flex items-center justify-center overflow-hidden">
+              {cameraStreamActive ? (
+                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center bg-gradient-to-b from-slate-900 to-slate-950">
+                  <Camera className="w-12 h-12 text-indigo-400 mb-2" />
+                  <p className="text-xs font-semibold text-slate-200">Live Camera Viewfinder Ready</p>
+                  <p className="text-[11px] text-slate-400 mt-1 max-w-xs">
+                    Select simulated field scene below to capture a live geo-watermarked frame:
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-1.5 mt-3">
+                    {CATEGORIES.map((cat) => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setCameraSimCategory(cat.id)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border ${
+                          cameraSimCategory === cat.id
+                            ? 'bg-indigo-600 text-white border-indigo-400'
+                            : 'bg-slate-800 text-slate-300 border-slate-700'
+                        }`}
+                      >
+                        {cat.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Live HUD Overlay inside Viewfinder */}
+              <div className="absolute top-3 left-3 right-3 flex justify-between items-center text-[10px] font-mono pointer-events-none">
+                <span className="px-2 py-0.5 rounded bg-red-600/90 text-white font-bold">● REC LIVE</span>
+                <span className="px-2 py-0.5 rounded bg-slate-950/80 text-emerald-300 border border-slate-700">
+                  {coords.route}
+                </span>
+              </div>
+
+              <div className="absolute bottom-0 inset-x-0 bg-slate-950/85 px-4 py-2 text-[11px] font-mono text-emerald-300 border-t border-slate-800">
+                <div>
+                  GPS STAMP: {coords.lat.toFixed(5)}° N, {coords.lng.toFixed(5)}° E
+                </div>
+                <div className="text-slate-300 text-[10px] truncate">{coords.address}</div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-950 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={closeLiveCamera}
+                className="px-4 py-2 rounded-xl border border-slate-700 text-xs font-semibold text-slate-300 hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={captureFromLiveCamera}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg flex items-center justify-center gap-2"
+              >
+                <Camera className="w-4 h-4" /> Capture Geo-Marked Photo & AI Auto-Fill
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ====================================================================
+          FASTAPI & POSTGRESQL/POSTGIS BACKEND INSPECTOR DRAWER
+         ==================================================================== */}
+      {showBackendDrawer && (
+        <section className="bg-slate-950 text-slate-200 border-b border-slate-800 shadow-inner">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-emerald-400" />
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                  FastAPI + PostgreSQL/PostGIS Live Backend Engine
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {[
+                  { id: 'logs', label: 'Live API Logs' },
+                  { id: 'fastapi', label: 'FastAPI Python Code' },
+                  { id: 'sql', label: 'PostGIS Schema DDL' },
+                ].map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setInspectorTab(t.id)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${
+                      inspectorTab === t.id ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+                <button onClick={() => setShowBackendDrawer(false)} className="text-slate-400 hover:text-white ml-2">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {inspectorTab === 'logs' && (
+              <div className="max-h-52 overflow-y-auto space-y-2 font-mono text-xs">
+                {apiLogs.map((log) => (
+                  <div key={log.id} className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex justify-between gap-2">
+                    <div>
+                      <span className="px-1.5 py-0.5 rounded font-bold text-[10px] bg-emerald-500/20 text-emerald-300 mr-2">
+                        {log.method}
+                      </span>
+                      <span className="text-indigo-300 font-semibold">{log.endpoint}</span>
+                      <pre className="text-[11px] text-slate-400 mt-1">{JSON.stringify(log.payload)}</pre>
+                    </div>
+                    <span className="text-[10px] text-slate-500 whitespace-nowrap">
+                      {log.status} • {log.latency}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {inspectorTab === 'fastapi' && (
+              <pre className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] font-mono text-emerald-300 overflow-x-auto max-h-56">
+                {FASTAPI_BACKEND_CODE}
+              </pre>
+            )}
+
+            {inspectorTab === 'sql' && (
+              <pre className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] font-mono text-sky-300 overflow-x-auto max-h-56">
+                {POSTGRES_SCHEMA_SQL}
+              </pre>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* ====================================================================
+          MAIN VIEWPORT ROUTER
+         ==================================================================== */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* ==================================================================
+            1. CITIZEN PORTAL (AUTO GPS + LIVE CAMERA + AI AUTO-FILL + 100M LOCK)
+           ================================================================== */}
+        {activeRole === 'citizen' && (
+          <div className="space-y-6">
+            {/* Top Citizen Banner */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xl font-bold text-slate-900">Citizen Geo-Reporting Portal</h2>
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-bold flex items-center gap-1">
+                    <Award className="w-3.5 h-3.5" /> {currentUser.points} Civic Points ({currentUser.badge})
+                  </span>
+                </div>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  Capture a live photo or upload an image — AI Vision auto-fills category & details, while PostGIS enforces a 100m lock on unresolved reports.
+                </p>
+              </div>
+
+              <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 self-start">
+                <button
+                  onClick={() => setCitizenTab('report')}
+                  className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+                    citizenTab === 'report' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  + Report Issue
+                </button>
+                <button
+                  onClick={() => setCitizenTab('history')}
+                  className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+                    citizenTab === 'history' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Complaint Feed ({complaints.length})
+                </button>
+              </div>
+            </div>
+
+            {citizenTab === 'report' ? (
+              <form onSubmit={handleSubmitComplaint} className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* LEFT COLUMN: LIVE CAMERA / UPLOAD + INSTANT AI AUTO-FILL + MANUAL OVERRIDE */}
+                <div className="lg:col-span-7 space-y-5 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-indigo-600" /> 1. Live Geo-Photo & Instant AI Auto-Fill
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setManualOverrideMode(!manualOverrideMode)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border flex items-center gap-1 transition-colors ${
+                        manualOverrideMode
+                          ? 'bg-amber-100 text-amber-800 border-amber-300'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      {manualOverrideMode ? 'Manual Edit Enabled' : 'Manual Override'}
+                    </button>
+                  </div>
+
+                  {/* Capture Live Photo OR Upload Image Buttons */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={openLiveCamera}
+                      className="flex flex-col items-center justify-center h-32 rounded-xl bg-gradient-to-br from-indigo-600 to-blue-700 hover:from-indigo-700 hover:to-blue-800 text-white p-4 shadow-md transition-all group"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center mb-1.5 group-hover:scale-110 transition-transform">
+                        <Camera className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-bold">Capture Live Photo</span>
+                      <span className="text-[10px] text-indigo-100 mt-0.5">Auto-stamps GPS & Timestamp</span>
+                    </button>
+
+                    <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-xl cursor-pointer bg-slate-50 hover:bg-indigo-50/30 p-4 text-center transition-colors">
+                      <Plus className="w-7 h-7 text-indigo-600 mb-1" />
+                      <span className="text-xs font-bold text-slate-800">Upload Photo from Gallery</span>
+                      <span className="text-[10px] text-slate-500 mt-0.5">Instant AI Category & Details Auto-Fill</span>
+                      <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
+                    </label>
+                  </div>
+
+                  {/* Watermarked Image Preview & AI Status */}
+                  {isClassifying && (
+                    <div className="p-3.5 rounded-xl bg-indigo-50 border border-indigo-200 text-xs text-indigo-800 flex items-center gap-2.5 font-medium">
+                      <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+                      Analyzing image with MobileNetV3 Vision & stamping GPS coordinates...
+                    </div>
+                  )}
+
+                  {uploadedPhoto && !isClassifying && (
+                    <div className="space-y-3">
+                      <div className="relative h-48 rounded-xl overflow-hidden border border-slate-300 bg-slate-950 shadow-inner">
+                        <img src={uploadedPhoto} alt="Geo-Stamped Evidence" className="w-full h-full object-cover" />
+                        <span className="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-md bg-emerald-600/95 text-white text-[10px] font-bold shadow flex items-center gap-1">
+                          <BadgeCheck className="w-3.5 h-3.5" /> Live Geo-Watermark Applied
+                        </span>
+                      </div>
+
+                      {aiResult && (
+                        <div className="p-3 rounded-xl bg-gradient-to-r from-indigo-50 to-emerald-50 border border-indigo-200 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2.5">
+                            <Sparkles className="w-5 h-5 text-indigo-600 shrink-0" />
+                            <div>
+                              <div className="text-xs font-bold text-slate-900">
+                                AI Auto-Matched:{' '}
+                                <span className="uppercase text-indigo-700">
+                                  {CATEGORIES.find((c) => c.id === category)?.name}
+                                </span>
+                                <span className="ml-2 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px]">
+                                  {Math.round(aiResult.confidence * 100)}% Confidence
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-600">
+                                Title, description, severity & municipal route auto-populated below.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Category Selector (Auto-selected by AI, Manually Overridable anytime) */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                        Issue Category {aiResult && !manualOverrideMode ? '(AI Selected)' : '(Manual Selection)'}
+                      </label>
+                      <span className="text-[11px] text-indigo-600 font-semibold">
+                        Assigned Dept: {DEPARTMENTS.find((d) => d.id === CATEGORIES.find((c) => c.id === category)?.deptId)?.name}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      {CATEGORIES.map((cat) => {
+                        const Icon = cat.icon;
+                        const active = category === cat.id;
+                        return (
+                          <button
+                            type="button"
+                            key={cat.id}
+                            onClick={() => {
+                              setCategory(cat.id);
+                              setManualOverrideMode(true);
+                              if (!title) setTitle(`${cat.autoTitle} at ${coords.address.split(',')[0]}`);
+                              if (!description) setDescription(cat.autoDesc);
+                            }}
+                            className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                              active
+                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm scale-[1.02]'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                            }`}
+                          >
+                            <Icon className="w-4 h-4 mb-1" />
+                            <span className="text-[11px] text-center leading-tight">{cat.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Auto-Filled / Manually Editable Form Details */}
+                  <div className="space-y-3 pt-1">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Issue Title {aiResult && <span className="text-emerald-600 font-normal">(Auto-filled from image)</span>}
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={title}
+                        onChange={(e) => {
+                          setTitle(e.target.value);
+                          setManualOverrideMode(true);
+                        }}
+                        placeholder="Upload/capture a photo to auto-fill or type manually..."
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Detailed Description {aiResult && <span className="text-emerald-600 font-normal">(AI generated — editable)</span>}
+                      </label>
+                      <textarea
+                        rows={3}
+                        required
+                        value={description}
+                        onChange={(e) => {
+                          setDescription(e.target.value);
+                          setManualOverrideMode(true);
+                        }}
+                        placeholder="AI will auto-generate technical issue details upon image upload..."
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-xs font-bold text-slate-700 mb-1">
+                        <span>Public Safety Risk Score</span>
+                        <span className="text-indigo-600">{safetyRisk} / 30</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={10}
+                        max={30}
+                        value={safetyRisk}
+                        onChange={(e) => setSafetyRisk(Number(e.target.value))}
+                        className="w-full accent-indigo-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* RIGHT COLUMN: AUTO GPS GEOLOCATION, GOOGLE MAPS/EARTH & 100M LOCK */}
+                <div className="lg:col-span-5 space-y-5">
+                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                      <div>
+                        <h3 className="font-bold text-slate-800 flex items-center gap-1.5">
+                          <LocateFixed className="w-4 h-4 text-indigo-600" /> 2. Auto GPS & 100m Geofence
+                        </h3>
+                        <p className="text-[11px] text-slate-500">{gpsSource}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={fetchCurrentLocation}
+                        disabled={isLocating}
+                        className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold border border-indigo-200 flex items-center gap-1.5 transition-colors"
+                      >
+                        <Navigation className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin' : ''}`} />
+                        Re-center GPS
+                      </button>
+                    </div>
+
+                    {/* Google Maps / Satellite / Hybrid Interactive View */}
+                    <GoogleMapsEarthView
+                      complaints={complaints}
+                      selectedCoords={coords}
+                      onSelectCoords={(newC) => setCoords(newC)}
+                      interactive={true}
+                    />
+
+                    {/* Detected Route & Address Telemetry */}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Inspection Route</span>
+                        <span className="font-bold text-indigo-700">{coords.route}</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">Coordinates</span>
+                        <span className="font-mono font-semibold text-slate-800">
+                          {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* STRICT 100-METER UNRESOLVED PROXIMITY LOCK BANNER */}
+                    {unresolvedWithin100m.length > 0 ? (
+                      <div className="p-4 rounded-xl bg-red-50 border-2 border-red-300 space-y-3 shadow-xs">
+                        <div className="flex items-start gap-2.5">
+                          <Lock className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                          <div>
+                            <h4 className="text-xs font-extrabold text-red-900 uppercase tracking-wide">
+                              Duplicate Zone Locked (Within 100 Meters)
+                            </h4>
+                            <p className="text-xs text-red-800 mt-1 leading-relaxed">
+                              An active unresolved issue (<strong>{unresolvedWithin100m[0].id}</strong>) is already reported{' '}
+                              <strong>{unresolvedWithin100m[0].distanceMeters} meters away</strong>. New reports within 100m are blocked until resolved!
+                            </p>
+                          </div>
+                        </div>
+
+                        {unresolvedWithin100m.map((dup) => (
+                          <div
+                            key={dup.id}
+                            className="flex items-center justify-between gap-2 bg-white p-2.5 rounded-xl border border-red-200 text-xs shadow-xs"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 truncate">
+                                {dup.id} • {dup.title}
+                              </div>
+                              <div className="text-[11px] text-slate-500">
+                                Distance: <strong className="text-red-600">{dup.distanceMeters}m</strong> • Status: {dup.status}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleUpvoteExistingTicket(dup)}
+                              className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-xs shrink-0 flex items-center gap-1 shadow-sm"
+                            >
+                              <ThumbsUp className="w-3.5 h-3.5" /> Upvote (+1)
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-center gap-2">
+                        <Unlock className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>
+                          <strong>Zone Clear:</strong> No unresolved reports within 100m. Eligible for{' '}
+                          <strong>+10 pts</strong> now & <strong>+50 pts</strong> upon resolution!
+                        </span>
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={unresolvedWithin100m.length > 0}
+                      className={`w-full py-3.5 px-4 rounded-xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 ${
+                        unresolvedWithin100m.length > 0
+                          ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                          : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                      }`}
+                    >
+                      {unresolvedWithin100m.length > 0 ? (
+                        <>
+                          <Lock className="w-4 h-4" /> Locked (Unresolved Issue Within 100m)
+                        </>
+                      ) : (
+                        <>
+                          <span>Submit Verified Report (+10 Civic Pts)</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            ) : (
+              /* CITIZEN COMPLAINT FEED WITH BEFORE/AFTER PROOF & CIVIC POINTS */
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {complaints.map((item) => {
+                  const priority = computePriorityBreakdown(item);
+                  const draft = feedbackDrafts[item.id] || { rating: 5, comment: '' };
+                  return (
+                    <div key={item.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3.5 flex flex-col justify-between">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-extrabold text-indigo-600">{item.id}</span>
+                            <CategoryBadge categoryId={item.category} />
+                          </div>
+                          <StatusBadge status={item.status} />
+                        </div>
+
+                        <div>
+                          <h3 className="font-bold text-slate-900 text-base">{item.title}</h3>
+                          <p className="text-xs text-slate-600 mt-1">{item.description}</p>
+                        </div>
+
+                        {/* Before / After Geo-Evidence */}
+                        <div className={`grid ${item.afterImage ? 'grid-cols-2' : 'grid-cols-1'} gap-2.5`}>
+                          <div className="relative h-32 rounded-xl overflow-hidden border border-slate-200 bg-slate-900">
+                            <img src={item.beforeImage} alt="Before" className="w-full h-full object-cover" />
+                            <span className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded bg-black/75 text-white text-[10px] font-bold">
+                              Before Proof
+                            </span>
+                          </div>
+                          {item.afterImage && (
+                            <div className="relative h-32 rounded-xl overflow-hidden border-2 border-emerald-400 bg-slate-900">
+                              <img src={item.afterImage} alt="After" className="w-full h-full object-cover" />
+                              <span className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-bold">
+                                Resolved Proof
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Reward Status Pill */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                          <span className="text-slate-600">
+                            Reporter: <strong className="text-slate-900">{item.reporterName}</strong> ({item.reporterPhone})
+                          </span>
+                          {item.pointsAwarded ? (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center gap-1">
+                              <Award className="w-3 h-3" /> +50 Pts Credited & Zone Unlocked
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold">
+                              +50 Pts Pending Resolution
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Citizen Feedback for Resolved Complaints */}
+                      {item.status === 'Resolved' && (
+                        <div className="pt-2 border-t border-slate-100">
+                          {item.feedback ? (
+                            <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs flex items-center justify-between">
+                              <span className="font-medium text-emerald-900">"{item.feedback.comment}"</span>
+                              <span className="font-bold text-amber-600 flex items-center gap-0.5">
+                                {item.feedback.rating} <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={draft.rating}
+                                onChange={(e) =>
+                                  setFeedbackDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...draft, rating: Number(e.target.value) },
+                                  }))
+                                }
+                                className="px-2 py-1.5 rounded-lg border border-slate-300 text-xs font-bold"
+                              >
+                                <option value={5}>5 ★</option>
+                                <option value={4}>4 ★</option>
+                                <option value={3}>3 ★</option>
+                              </select>
+                              <input
+                                type="text"
+                                placeholder="Verify resolution & leave feedback..."
+                                value={draft.comment}
+                                onChange={(e) =>
+                                  setFeedbackDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...draft, comment: e.target.value },
+                                  }))
+                                }
+                                className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs"
+                              />
+                              <button
+                                onClick={() => handleCitizenFeedback(item.id)}
+                                className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold"
+                              >
+                                Rate
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ==================================================================
+            2. ADMIN & ROUTE-WISE DISPATCH DASHBOARD
+           ================================================================== */}
+        {activeRole === 'admin' && (
+          <div className="space-y-6">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Route-Wise Municipal Dispatch Command</h2>
+                <p className="text-sm text-slate-500">
+                  Filter tickets by inspection route, category, or status. Assign field engineers and manage priority overrides.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={adminRouteFilter}
+                  onChange={(e) => setAdminRouteFilter(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold bg-white text-indigo-700"
+                >
+                  <option value="All">All Routes (A, B, C, D)</option>
+                  {INSPECTION_ROUTES.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={adminCategoryFilter}
+                  onChange={(e) => setAdminCategoryFilter(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white"
+                >
+                  <option value="All">Category: All</option>
+                  {CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={adminStatusFilter}
+                  onChange={(e) => setAdminStatusFilter(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white"
+                >
+                  <option value="All">Status: All</option>
+                  <option value="Open">Open</option>
+                  <option value="Assigned">Assigned</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Resolved">Resolved</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Interactive Route Map */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                  <Route className="w-4 h-4 text-indigo-600" /> Route Corridor GIS Map ({adminRouteFilter})
+                </h3>
+                <div className="flex flex-wrap gap-2 text-[11px]">
+                  {INSPECTION_ROUTES.map((r) => (
+                    <span key={r.id} className="inline-flex items-center gap-1 font-semibold text-slate-600">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: r.color }} />
+                      {r.id}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <GoogleMapsEarthView
+                complaints={complaints}
+                selectedRoute={adminRouteFilter}
+                selectedCategory={adminCategoryFilter}
+                selectedStatus={adminStatusFilter}
+                onSelectComplaint={(ticket) => {
+                  setSelectedAdminTicket(ticket);
+                  setAssignDept(ticket.departmentId || 'dept-roads');
+                  setAssignStaff(ticket.staffId || '');
+                  setAdminNoteInput(ticket.adminNote || '');
+                  setPriorityOverrideInput(
+                    ticket.manualPriorityOverride !== null ? String(ticket.manualPriorityOverride) : ''
+                  );
+                }}
+              />
+            </div>
+
+            {/* Dispatch Table */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      <th className="py-3.5 px-4">Ticket & Route</th>
+                      <th className="py-3.5 px-4">Category & Reporter</th>
+                      <th className="py-3.5 px-4">Priority Score</th>
+                      <th className="py-3.5 px-4">Assigned Staff</th>
+                      <th className="py-3.5 px-4">Status</th>
+                      <th className="py-3.5 px-4 text-right">Dispatch</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-sm">
+                    {filteredAdminComplaints.map((ticket) => {
+                      const p = computePriorityBreakdown(ticket);
+                      const staff = STAFF_MEMBERS.find((s) => s.id === ticket.staffId);
+                      return (
+                        <tr key={ticket.id} className="hover:bg-slate-50/90">
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-extrabold text-indigo-600">{ticket.id}</span>
+                              <span className="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
+                                {ticket.route}
+                              </span>
+                            </div>
+                            <div className="font-bold text-slate-900 text-xs mt-1">{ticket.title}</div>
+                            <div className="text-[11px] text-slate-500">{ticket.address}</div>
+                          </td>
+                          <td className="py-3.5 px-4 space-y-1">
+                            <CategoryBadge categoryId={ticket.category} />
+                            <div className="text-[11px] text-slate-500 font-mono">{ticket.reporterPhone}</div>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span className={`px-2.5 py-0.5 rounded-md text-xs font-bold border ${p.badgeClass}`}>
+                              {p.finalScore}/100 ({p.level})
+                            </span>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              {ticket.upvotes || 1} citizen endorsements
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4 text-xs font-semibold text-slate-700">
+                            {staff ? staff.name : <span className="text-amber-600 italic">Unassigned</span>}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <StatusBadge status={ticket.status} />
+                          </td>
+                          <td className="py-3.5 px-4 text-right">
+                            <button
+                              onClick={() => {
+                                setSelectedAdminTicket(ticket);
+                                setAssignDept(ticket.departmentId || 'dept-roads');
+                                setAssignStaff(ticket.staffId || '');
+                                setAdminNoteInput(ticket.adminNote || '');
+                                setPriorityOverrideInput(
+                                  ticket.manualPriorityOverride !== null ? String(ticket.manualPriorityOverride) : ''
+                                );
+                              }}
+                              className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm"
+                            >
+                              Assign
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Admin Dispatch Modal */}
+            {selectedAdminTicket && (
+              <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div>
+                      <h3 className="font-bold text-slate-900">Dispatch {selectedAdminTicket.id}</h3>
+                      <p className="text-xs text-indigo-600 font-semibold">{selectedAdminTicket.route}</p>
+                    </div>
+                    <button onClick={() => setSelectedAdminTicket(null)} className="text-slate-400 hover:text-slate-700">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Municipal Department</label>
+                    <select
+                      value={assignDept}
+                      onChange={(e) => setAssignDept(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"
+                    >
+                      {DEPARTMENTS.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name} (SLA: {d.slaHours}h)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Assign Field Engineer</label>
+                    <select
+                      value={assignStaff}
+                      onChange={(e) => setAssignStaff(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"
+                    >
+                      <option value="">-- Select Field Engineer --</option>
+                      {STAFF_MEMBERS.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.route})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Manual Priority Override (0–100, optional)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={priorityOverrideInput}
+                      onChange={(e) => setPriorityOverrideInput(e.target.value)}
+                      placeholder="Leave blank for rule-based score"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Field Dispatch Instructions</label>
+                    <textarea
+                      rows={2}
+                      value={adminNoteInput}
+                      onChange={(e) => setAdminNoteInput(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      onClick={() => setSelectedAdminTicket(null)}
+                      className="px-4 py-2 rounded-xl border border-slate-300 text-xs font-semibold"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSaveDispatch}
+                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold"
+                    >
+                      Confirm & Dispatch
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ==================================================================
+            3. FIELD STAFF WORKSPACE (RESOLVES TICKETS -> UNLOCKS 100M & CREDITS +50 PTS)
+           ================================================================== */}
+        {activeRole === 'staff' && (
+          <div className="space-y-6">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Field Engineer Execution Workspace</h2>
+                <p className="text-sm text-slate-500">
+                  Marking a job <strong>Resolved</strong> uploads geo-proof, unlocks the 100m map zone, and automatically credits{' '}
+                  <strong>+50 Civic Points</strong> to the citizen!
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={staffRouteFilter}
+                  onChange={(e) => setStaffRouteFilter(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white"
+                >
+                  <option value="All">All Routes</option>
+                  {INSPECTION_ROUTES.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.id}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={activeStaffId}
+                  onChange={(e) => setActiveStaffId(e.target.value)}
+                  className="px-3.5 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-900 text-xs font-bold"
+                >
+                  {STAFF_MEMBERS.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {staffJobs.length === 0 ? (
+              <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center space-y-2">
+                <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
+                <h3 className="font-bold text-slate-800">No assigned jobs in this filter</h3>
+                <p className="text-xs text-slate-500">Switch engineer profile or assign new tickets from Route Dispatch.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {staffJobs.map((job) => {
+                  const noteValue = staffNotesDraft[job.id] ?? job.staffNote ?? '';
+                  const previewAfter = afterEvidenceDraft[job.id] || job.afterImage;
+                  return (
+                    <div key={job.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-extrabold text-indigo-600">{job.id}</span>
+                          <CategoryBadge categoryId={job.category} />
+                          <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold">
+                            {job.route}
+                          </span>
+                        </div>
+                        <StatusBadge status={job.status} />
+                      </div>
+
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-base">{job.title}</h3>
+                        <p className="text-xs text-slate-600 mt-1">{job.description}</p>
+                        <div className="text-[11px] text-slate-500 mt-1.5">
+                          Citizen Reporter: <strong>{job.reporterName}</strong> ({job.reporterPhone})
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="relative h-32 rounded-xl overflow-hidden border bg-slate-900">
+                          <img src={job.beforeImage} alt="Before" className="w-full h-full object-cover" />
+                          <span className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded bg-black/75 text-white text-[10px] font-bold">
+                            Before Photo
+                          </span>
+                        </div>
+                        {previewAfter ? (
+                          <div className="relative h-32 rounded-xl overflow-hidden border-2 border-emerald-400 bg-slate-900">
+                            <img src={previewAfter} alt="After" className="w-full h-full object-cover" />
+                            <span className="absolute bottom-1.5 left-1.5 px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-bold">
+                              After Proof Ready
+                            </span>
+                          </div>
+                        ) : (
+                          <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-emerald-300 rounded-xl cursor-pointer bg-emerald-50/40 hover:bg-emerald-50 p-2 text-center">
+                            <Camera className="w-6 h-6 text-emerald-600 mb-1" />
+                            <span className="text-[11px] font-bold text-emerald-800">Upload After Geo-Proof</span>
+                            <span className="text-[10px] text-emerald-600">Or auto-generate on resolve</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const r = new FileReader();
+                                r.onload = async () => {
+                                  const stamped = await stampPhotoWithGeoWatermark(r.result, {
+                                    lat: job.lat,
+                                    lng: job.lng,
+                                    address: job.address,
+                                    route: job.route,
+                                  });
+                                  setAfterEvidenceDraft((prev) => ({ ...prev, [job.id]: stamped }));
+                                };
+                                r.readAsDataURL(file);
+                              }}
+                              className="hidden"
+                            />
+                          </label>
+                        )}
+                      </div>
+
+                      <div className="space-y-3">
+                        <input
+                          type="text"
+                          value={noteValue}
+                          onChange={(e) => setStaffNotesDraft((prev) => ({ ...prev, [job.id]: e.target.value }))}
+                          placeholder="Mandatory field resolution summary..."
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {job.status !== 'In Progress' && job.status !== 'Resolved' && (
+                            <button
+                              onClick={() => handleStaffStatusUpdate(job, 'In Progress')}
+                              className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold"
+                            >
+                              Mark In Progress
+                            </button>
+                          )}
+                          {job.status !== 'Resolved' ? (
+                            <button
+                              onClick={() => handleStaffStatusUpdate(job, 'Resolved')}
+                              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                            >
+                              <CheckCircle2 className="w-4 h-4" /> Mark Resolved (+50 Citizen Pts)
+                            </button>
+                          ) : (
+                            <span className="text-xs font-bold text-emerald-700 flex items-center gap-1">
+                              <BadgeCheck className="w-4 h-4" /> Resolved & +50 Pts Credited
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ==================================================================
+            4. CITIZEN REWARDS & LEADERBOARD (GAMIFIED BY MOBILE NUMBER)
+           ================================================================== */}
+        {activeRole === 'leaderboard' && (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-2xl shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="space-y-1.5">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30 text-xs font-bold">
+                  <Trophy className="w-3.5 h-3.5" /> CivicPulse Citizen Rewards Program
+                </div>
+                <h2 className="text-2xl font-extrabold">Verified Mobile Number Leaderboard</h2>
+                <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
+                  Citizens earn <strong>+10 Civic Points</strong> for every geo-verified report and{' '}
+                  <strong>+50 Civic Points</strong> once municipal engineers resolve their complaint. Points redeem for metro passes, property tax rebates & civic honors.
+                </p>
+              </div>
+
+              <div className="bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-4 min-w-[240px]">
+                <div className="text-[11px] uppercase tracking-wider text-indigo-200 font-bold">Your Active Wallet</div>
+                <div className="text-lg font-extrabold mt-0.5">{currentUser.name}</div>
+                <div className="text-xs font-mono text-slate-300">{currentUser.phone}</div>
+                <div className="mt-3 flex items-center justify-between pt-2 border-t border-white/15">
+                  <span className="text-2xl font-black text-amber-400">{currentUser.points} PTS</span>
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold">
+                    {currentUser.badge}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="font-bold text-slate-900">Top Civic Contributors (Ranked by Verified Points)</h3>
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="text-xs font-bold text-indigo-600 hover:text-indigo-700"
+                >
+                  Switch Mobile Number →
+                </button>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {[...users]
+                  .sort((a, b) => b.points - a.points)
+                  .map((user, idx) => (
+                    <div
+                      key={user.phone}
+                      className={`px-6 py-4 flex flex-wrap items-center justify-between gap-4 ${
+                        user.phone === currentUser.phone ? 'bg-indigo-50/60' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div
+                          className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-sm ${
+                            idx === 0
+                              ? 'bg-amber-400 text-amber-950'
+                              : idx === 1
+                              ? 'bg-slate-300 text-slate-900'
+                              : idx === 2
+                              ? 'bg-orange-300 text-orange-950'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          #{idx + 1}
+                        </div>
+                        <div>
+                          <div className="font-bold text-slate-900 flex items-center gap-2">
+                            <span>{user.name}</span>
+                            {user.phone === currentUser.phone && (
+                              <span className="px-2 py-0.5 rounded bg-indigo-600 text-white text-[10px] font-bold">YOU</span>
+                            )}
+                          </div>
+                          <div className="text-xs font-mono text-slate-500">{user.phone}</div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-6 text-xs">
+                        <div className="text-center">
+                          <div className="font-extrabold text-slate-800">{user.verifiedReports}</div>
+                          <div className="text-[10px] text-slate-400 uppercase">Reports</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="font-extrabold text-emerald-600">{user.resolvedReports}</div>
+                          <div className="text-[10px] text-slate-400 uppercase">Resolved</div>
+                        </div>
+                        <div className="px-3.5 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 font-black text-sm">
+                          {user.points} pts
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================================
+            5. GIS HEATMAP & ANALYTICS VIEW
+           ================================================================== */}
+        {activeRole === 'analytics' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="text-xs font-semibold text-slate-500">Total Geo-Reports</div>
+                <div className="text-2xl font-black text-slate-900 mt-1">{analyticsStats.total}</div>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="text-xs font-semibold text-slate-500">Active 100m Locks</div>
+                <div className="text-2xl font-black text-red-600 mt-1">{analyticsStats.activeLocks}</div>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="text-xs font-semibold text-slate-500">Resolved & Unlocked</div>
+                <div className="text-2xl font-black text-emerald-600 mt-1">{analyticsStats.resolved}</div>
+              </div>
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="text-xs font-semibold text-slate-500">Civic Points Issued</div>
+                <div className="text-2xl font-black text-amber-600 mt-1">{analyticsStats.totalPoints}</div>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              <div>
+                <h3 className="font-bold text-slate-900">Google Earth / PostGIS Density Heatmap & 100m Geofence Zones</h3>
+                <p className="text-xs text-slate-500">
+                  Red dashed rings indicate active 100-meter duplicate lock zones that automatically unlock once field staff mark the ticket Resolved.
+                </p>
+              </div>
+              <GoogleMapsEarthView complaints={complaints} showHeatmap={true} />
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
