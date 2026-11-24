@@ -1,0 +1,2 @@
+# Koi external package nahi chahiye - server.py sirf Python standard library use karta hai.
+# Render ka build command "pip install -r requirements.txt" is file ke liye hai.
